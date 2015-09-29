@@ -1163,12 +1163,19 @@ lookupSigCtxtOccRn ctxt what
   = wrapLocM $ \ rdr_name ->
     do { mb_name <- lookupBindGroupOcc ctxt what rdr_name
        ; case mb_name of
-           Left err   -> do { addErr err; return (mkUnboundName rdr_name) }
-           Right name -> return name }
+           Warning warn -> do { addWarn warn; return (mkUnboundName rdr_name) }
+           Error err    -> do { addErr err; return (mkUnboundName rdr_name) }
+           Success name -> return name
+       }
+
+data LookupBindResult = Warning MsgDoc
+                      | Error MsgDoc
+                      | Success Name
 
 lookupBindGroupOcc :: HsSigCtxt
                    -> SDoc
-                   -> RdrName -> RnM (Either MsgDoc Name)
+                   -> RdrName
+                   -> RnM LookupBindResult
 -- Looks up the RdrName, expecting it to resolve to one of the
 -- bound names passed in.  If not, return an appropriate error message
 --
@@ -1198,8 +1205,8 @@ lookupBindGroupOcc ctxt what rdr_name
       = do { env <- getGlobalRdrEnv
            ; let gres = lookupSubBndrGREs env (Just cls) rdr_name
            ; case gres of
-               []      -> return (Left (unknownSubordinateErr doc rdr_name))
-               (gre:_) -> return (Right (gre_name gre)) }
+               []      -> return (Error (unknownSubordinateErr doc rdr_name))
+               (gre:_) -> return (Success (gre_name gre)) }
                         -- If there is more than one local GRE for the
                         -- same OccName 'f', that will be reported separately
                         -- as a duplicate top-level binding for 'f'
@@ -1231,6 +1238,25 @@ lookupBindGroupOcc ctxt what rdr_name
     local_msg = parens $ ptext (sLit "The")  <+> what <+> ptext (sLit "must be given where")
                            <+> quotes (ppr rdr_name) <+> ptext (sLit "is declared")
 
+
+deprecated_cls_op :: Name    -- ^ Class
+                  -> RdrName -- ^ Operation
+                  -> Maybe MsgDoc -- ^ Nothing on success, otherwise the warning text
+deprecated_cls_op cls op = lookup (cls, op) deprecatedClsOps
+  where
+    deprecatedClsOps =
+        [ ((monadClassName, nameRdrName returnMName), returnWarnMsg)
+        , ((monadClassName, nameRdrName thenMName  ), thenWarnMsg)
+        ]
+
+    deprClsOpWarn instead =
+        quotes (ppr op)
+        <+> text "is deprecated, and will be removed in a future release."
+        $$
+        text "Implement" <+> text instead <+> "instead."
+
+    returnWarnMsg = deprClsOpWarn "Applicative.pure"
+    thenWarnMsg = deprClsOpWarn "(*>) from Applicative"
 
 ---------------
 lookupLocalTcNames :: HsSigCtxt -> SDoc -> RdrName -> RnM [Name]
