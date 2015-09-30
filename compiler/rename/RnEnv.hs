@@ -1250,7 +1250,10 @@ lookupBindGroupOcc ctxt what rdr_name
 deprecated_cls_op :: Name    -- ^ Class
                   -> RdrName -- ^ Operation
                   -> Maybe MsgDoc -- ^ Nothing on success, otherwise the warning text
-deprecated_cls_op cls op = lookup (cls, op) deprecatedClsOps
+deprecated_cls_op cls op = let x = lookup op deprecatedClsOps
+                               pprx (Just y) = y
+                               pprx Nothing = text ""
+                           in pprTrace "" (text "### Checking" <+> ppr op <+> pprx x <+> text ".") x
   where
     deprecatedClsOps =
         [ trace "### check return ###" $ ((monadClassName, nameRdrName returnMName), returnWarnMsg)
