@@ -81,6 +81,8 @@ import Data.Function    ( on )
 import ListSetOps       ( minusList )
 import Constants        ( mAX_TUPLE_SIZE )
 
+import PrelNames (monadClassName, returnMName, thenMName)
+
 {-
 *********************************************************
 *                                                      *
@@ -1163,23 +1165,20 @@ lookupSigCtxtOccRn ctxt what
   = wrapLocM $ \ rdr_name ->
     do { mb_name <- lookupBindGroupOcc ctxt what rdr_name
        ; case mb_name of
-           Error err         -> do { addErr err; return (mkUnboundName rdr_name) }
-           Warning warn name -> do { addWarn warn; return name }
-           Success name      -> return name
+           Left err   -> do { addErr err; return (mkUnboundName rdr_name) }
+           Right name -> return name
        }
 
-data LookupBindResult = Success Name
-                      | Warning MsgDoc Name
-                      | Error MsgDoc
-
+-- | Looks up the RdrName, expecting it to resolve to one of the
+-- bound names passed in. If not, return an appropriate error message.
+-- This function may issue a warning if a name is found, but marked as
+-- deprecated.
+--
+-- See Note [Looking up signature names]
 lookupBindGroupOcc :: HsSigCtxt
                    -> SDoc
                    -> RdrName
-                   -> RnM LookupBindResult
--- Looks up the RdrName, expecting it to resolve to one of the
--- bound names passed in.  If not, return an appropriate error message
---
--- See Note [Looking up signature names]
+                   -> RnM (Either MsgDoc Name)
 lookupBindGroupOcc ctxt what rdr_name
   | Just n <- isExact_maybe rdr_name
   = lookupExactOcc_either n   -- allow for the possibility of missing Exacts;
@@ -1204,12 +1203,13 @@ lookupBindGroupOcc ctxt what rdr_name
     lookup_cls_op cls
       = do { env <- getGlobalRdrEnv
            ; let gres = lookupSubBndrGREs env (Just cls) rdr_name
-           ; return $ case gres of
-               []      -> Error (unknownSubordinateErr doc rdr_name)
+           ; case gres of
+               []      -> return (Left (unknownSubordinateErr doc rdr_name))
                (gre:_) -> do let name = gre_name gre
-                             case deprecated_cls_op cls rdr_name of
-                                  Just warnMsg -> Warning warnMsg name
-                                  Nothing      -> Success name
+                             trace "### Check depr ###" $case deprecated_cls_op cls rdr_name of
+                                  Just warnMsg -> trace "### addWarn ###" $ addWarn warnMsg
+                                  Nothing      -> pure ()
+                             return (Right name)
                         -- If there is more than one local GRE for the
                         -- same OccName 'f', that will be reported separately
                         -- as a duplicate top-level binding for 'f'
@@ -1253,17 +1253,18 @@ deprecated_cls_op :: Name    -- ^ Class
 deprecated_cls_op cls op = lookup (cls, op) deprecatedClsOps
   where
     deprecatedClsOps =
-        [ ((monadClassName, nameRdrName returnMName), returnWarnMsg)
-        , ((monadClassName, nameRdrName thenMName  ), thenWarnMsg)
+        [ trace "### check return ###" $ ((monadClassName, nameRdrName returnMName), returnWarnMsg)
+        , trace "### check >> ###" $ ((monadClassName, nameRdrName thenMName  ), thenWarnMsg)
         ]
 
+    deprClsOpWarn :: String -> SDoc
     deprClsOpWarn instead =
         quotes (ppr op)
         <+> text "is deprecated, and will be removed in a future release."
         $$
-        text "Implement" <+> text instead <+> "instead."
+        text "Implement" <+> text instead <+> text "instead."
 
-    returnWarnMsg = deprClsOpWarn "Applicative.pure"
+    returnWarnMsg = deprClsOpWarn "pure from Applicative"
     thenWarnMsg = deprClsOpWarn "(*>) from Applicative"
 
 ---------------
