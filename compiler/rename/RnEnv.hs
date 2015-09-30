@@ -424,7 +424,7 @@ lookupInstDeclBndr cls what rdr
     doc = what <+> ptext (sLit "of class") <+> quotes (ppr cls)
 
 -- | Ad hoc warnings for certain built-in class members supposed to be removed
--- in GHC 8.*. A better (pragma-based) solution would be preferrable since it
+-- in GHC 8.*. A better (pragma-based) solution would be preferable since it
 -- would also be useable in user space, but since time is of the essence this
 -- will have to suffice.
 checkDeprecatedClassMember :: Name    -- ^ Class
