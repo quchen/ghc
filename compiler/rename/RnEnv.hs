@@ -414,9 +414,7 @@ lookupInstDeclBndr cls what rdr
                 -- In an instance decl you aren't allowed
                 -- to use a qualified name for the method
                 -- (Although it'd make perfect sense.)
-       ; case deprecated_cls_op cls rdr of
-            Nothing -> pure ()
-            Just warn -> addWarn warn
+       ; checkDeprecatedClassMember cls rdr
        ; lookupSubBndrOcc False -- False => we don't give deprecated
                                 -- warnings when a deprecated class
                                 -- method is defined. We only warn
@@ -425,32 +423,35 @@ lookupInstDeclBndr cls what rdr
   where
     doc = what <+> ptext (sLit "of class") <+> quotes (ppr cls)
 
-    -- | Ad hoc warnings for certain built-in class members supposed to be removed
-    -- in GHC 8.*. A better (pragma-based) solution would be preferrable since it
-    -- would also be useable in user space, but since time is of the essence this
-    -- will have to suffice.
-    deprecated_cls_op :: Name    -- ^ Class
-                      -> RdrName -- ^ Operation
-                      -> Maybe MsgDoc -- ^ Nothing on success, otherwise the warning text
-    deprecated_cls_op cls op = lookup (cls, rdrNameOcc op) deprecatedClsOps
+-- | Ad hoc warnings for certain built-in class members supposed to be removed
+-- in GHC 8.*. A better (pragma-based) solution would be preferrable since it
+-- would also be useable in user space, but since time is of the essence this
+-- will have to suffice.
+checkDeprecatedClassMember :: Name    -- ^ Class
+                           -> RdrName -- ^ Operation
+                           -> RnM () -- ^ Nothing on success, otherwise the warning text
+checkDeprecatedClassMember cls op
+    | Just warn <- lookup (cls, rdrNameOcc op) deprecatedClsOps = addWarn warn
+    | otherwise = pure ()
+
+  where
+
+    deprecatedClsOps :: [((Name, OccName), SDoc)]
     deprecatedClsOps =
         [ ((monadClassName, nameOccName returnMName), returnWarnMsg)
         , ((monadClassName, nameOccName thenMName  ), thenWarnMsg)
         ]
 
     deprClsOpWarn :: String -> SDoc
-    deprClsOpWarn instead =
+    deprClsOpWarn implementInstead =
         quotes (ppr op)
         <+> text "is deprecated, and will be removed in a future release."
         $$
-        text "Implement" <+> text instead <+> text "instead."
+        text "Implement" <+> text implementInstead <+> text "instead."
 
+    returnWarnMsg, thenWarnMsg :: SDoc
     returnWarnMsg = deprClsOpWarn "pure from Applicative"
     thenWarnMsg = deprClsOpWarn "(*>) from Applicative"
-
-
-
-
 
 -----------------------------------------------
 lookupFamInstName :: Maybe Name -> Located RdrName -> RnM (Located Name)
