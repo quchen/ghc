@@ -425,21 +425,14 @@ lookupInstDeclBndr cls what rdr
   where
     doc = what <+> ptext (sLit "of class") <+> quotes (ppr cls)
 
-
-
-
--- | Ad hoc warnings for certain built-in class members supposed to be removed
--- in GHC 8.*. A better (pragma-based) solution would be preferrable since it
--- would also be useable in user space, but since time is of the essence this
--- will have to suffice.
-deprecated_cls_op :: Name    -- ^ Class
-                  -> RdrName -- ^ Operation
-                  -> Maybe MsgDoc -- ^ Nothing on success, otherwise the warning text
-deprecated_cls_op cls op = let x = lookup (cls, rdrNameOcc op) deprecatedClsOps
-                               pprx (Just y) = y
-                               pprx Nothing = text ""
-                           in pprTrace "" (text "### Checking" <+> ppr cls <> text "." <> ppr op <+> pprx x <+> text ".") x
-  where
+    -- | Ad hoc warnings for certain built-in class members supposed to be removed
+    -- in GHC 8.*. A better (pragma-based) solution would be preferrable since it
+    -- would also be useable in user space, but since time is of the essence this
+    -- will have to suffice.
+    deprecated_cls_op :: Name    -- ^ Class
+                      -> RdrName -- ^ Operation
+                      -> Maybe MsgDoc -- ^ Nothing on success, otherwise the warning text
+    deprecated_cls_op cls op = lookup (cls, rdrNameOcc op) deprecatedClsOps
     deprecatedClsOps =
         [ ((monadClassName, nameOccName returnMName), returnWarnMsg)
         , ((monadClassName, nameOccName thenMName  ), thenWarnMsg)
