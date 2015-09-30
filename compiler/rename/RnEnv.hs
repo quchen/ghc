@@ -5,6 +5,7 @@
 -}
 
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE LambdaCase #-}
 
 module RnEnv (
         newTopSrcBinder,
@@ -429,10 +430,11 @@ lookupInstDeclBndr cls what rdr
 -- will have to suffice.
 checkDeprecatedClassMember :: Name    -- ^ Class
                            -> RdrName -- ^ Operation
-                           -> RnM () -- ^ Nothing on success, otherwise the warning text
-checkDeprecatedClassMember cls op
-    | Just warn <- lookup (cls, rdrNameOcc op) deprecatedClsOps = addWarn warn
-    | otherwise = pure ()
+                           -> RnM ()  -- ^ Warning if deprecated
+checkDeprecatedClassMember cls op =
+    woptM Opt_WarnWarningsDeprecations >>= \case
+        True | Just warn <- lookup (cls, rdrNameOcc op) deprecatedClsOps -> addWarn warn
+        _else -> pure ()
 
   where
 
