@@ -414,6 +414,9 @@ lookupInstDeclBndr cls what rdr
                 -- In an instance decl you aren't allowed
                 -- to use a qualified name for the method
                 -- (Although it'd make perfect sense.)
+       ; case deprecated_cls_op cls rdr of
+            Nothing -> pure ()
+            Just warn -> addWarn warn
        ; lookupSubBndrOcc False -- False => we don't give deprecated
                                 -- warnings when a deprecated class
                                 -- method is defined. We only warn
@@ -421,6 +424,39 @@ lookupInstDeclBndr cls what rdr
                           (Just cls) doc rdr }
   where
     doc = what <+> ptext (sLit "of class") <+> quotes (ppr cls)
+
+
+
+
+-- | Ad hoc warnings for certain built-in class members supposed to be removed
+-- in GHC 8.*. A better (pragma-based) solution would be preferrable since it
+-- would also be useable in user space, but since time is of the essence this
+-- will have to suffice.
+deprecated_cls_op :: Name    -- ^ Class
+                  -> RdrName -- ^ Operation
+                  -> Maybe MsgDoc -- ^ Nothing on success, otherwise the warning text
+deprecated_cls_op cls op = let x = lookup (cls, rdrNameOcc op) deprecatedClsOps
+                               pprx (Just y) = y
+                               pprx Nothing = text ""
+                           in pprTrace "" (text "### Checking" <+> ppr cls <> text "." <> ppr op <+> pprx x <+> text ".") x
+  where
+    deprecatedClsOps =
+        [ ((monadClassName, nameOccName returnMName), returnWarnMsg)
+        , ((monadClassName, nameOccName thenMName  ), thenWarnMsg)
+        ]
+
+    deprClsOpWarn :: String -> SDoc
+    deprClsOpWarn instead =
+        quotes (ppr op)
+        <+> text "is deprecated, and will be removed in a future release."
+        $$
+        text "Implement" <+> text instead <+> text "instead."
+
+    returnWarnMsg = deprClsOpWarn "pure from Applicative"
+    thenWarnMsg = deprClsOpWarn "(*>) from Applicative"
+
+
+
 
 
 -----------------------------------------------
@@ -1205,11 +1241,7 @@ lookupBindGroupOcc ctxt what rdr_name
            ; let gres = lookupSubBndrGREs env (Just cls) rdr_name
            ; case gres of
                []      -> return (Left (unknownSubordinateErr doc rdr_name))
-               (gre:_) -> do let name = gre_name gre
-                             trace "### Check depr ###" $case deprecated_cls_op cls rdr_name of
-                                  Just warnMsg -> trace "### addWarn ###" $ addWarn warnMsg
-                                  Nothing      -> pure ()
-                             return (Right name)
+               (gre:_) -> return (Right (gre_name gre))
                         -- If there is more than one local GRE for the
                         -- same OccName 'f', that will be reported separately
                         -- as a duplicate top-level binding for 'f'
@@ -1241,34 +1273,6 @@ lookupBindGroupOcc ctxt what rdr_name
 
     local_msg = parens $ ptext (sLit "The")  <+> what <+> ptext (sLit "must be given where")
                            <+> quotes (ppr rdr_name) <+> ptext (sLit "is declared")
-
-
--- | Ad hoc warnings for certain built-in class members supposed to be removed
--- in GHC 8.*. A better (pragma-based) solution would be preferrable since it
--- would also be useable in user space, but since time is of the essence this
--- will have to suffice.
-deprecated_cls_op :: Name    -- ^ Class
-                  -> RdrName -- ^ Operation
-                  -> Maybe MsgDoc -- ^ Nothing on success, otherwise the warning text
-deprecated_cls_op cls op = let x = lookup op deprecatedClsOps
-                               pprx (Just y) = y
-                               pprx Nothing = text ""
-                           in pprTrace "" (text "### Checking" <+> ppr op <+> pprx x <+> text ".") x
-  where
-    deprecatedClsOps =
-        [ trace "### check return ###" $ ((monadClassName, nameRdrName returnMName), returnWarnMsg)
-        , trace "### check >> ###" $ ((monadClassName, nameRdrName thenMName  ), thenWarnMsg)
-        ]
-
-    deprClsOpWarn :: String -> SDoc
-    deprClsOpWarn instead =
-        quotes (ppr op)
-        <+> text "is deprecated, and will be removed in a future release."
-        $$
-        text "Implement" <+> text instead <+> text "instead."
-
-    returnWarnMsg = deprClsOpWarn "pure from Applicative"
-    thenWarnMsg = deprClsOpWarn "(*>) from Applicative"
 
 ---------------
 lookupLocalTcNames :: HsSigCtxt -> SDoc -> RdrName -> RnM [Name]
