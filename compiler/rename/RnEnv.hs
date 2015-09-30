@@ -1163,14 +1163,14 @@ lookupSigCtxtOccRn ctxt what
   = wrapLocM $ \ rdr_name ->
     do { mb_name <- lookupBindGroupOcc ctxt what rdr_name
        ; case mb_name of
-           Warning warn -> do { addWarn warn; return (mkUnboundName rdr_name) }
-           Error err    -> do { addErr err; return (mkUnboundName rdr_name) }
-           Success name -> return name
+           Error err         -> do { addErr err; return (mkUnboundName rdr_name) }
+           Warning warn name -> do { addWarn warn; return name }
+           Success name      -> return name
        }
 
-data LookupBindResult = Warning MsgDoc
+data LookupBindResult = Success Name
+                      | Warning MsgDoc Name
                       | Error MsgDoc
-                      | Success Name
 
 lookupBindGroupOcc :: HsSigCtxt
                    -> SDoc
@@ -1204,12 +1204,16 @@ lookupBindGroupOcc ctxt what rdr_name
     lookup_cls_op cls
       = do { env <- getGlobalRdrEnv
            ; let gres = lookupSubBndrGREs env (Just cls) rdr_name
-           ; case gres of
-               []      -> return (Error (unknownSubordinateErr doc rdr_name))
-               (gre:_) -> return (Success (gre_name gre)) }
+           ; return $ case gres of
+               []      -> Error (unknownSubordinateErr doc rdr_name)
+               (gre:_) -> do let name = gre_name gre
+                             case deprecated_cls_op cls rdr_name of
+                                  Just warnMsg -> Warning warnMsg name
+                                  Nothing      -> Success name
                         -- If there is more than one local GRE for the
                         -- same OccName 'f', that will be reported separately
                         -- as a duplicate top-level binding for 'f'
+           }
       where
         doc = ptext (sLit "method of class") <+> quotes (ppr cls)
 
@@ -1239,6 +1243,10 @@ lookupBindGroupOcc ctxt what rdr_name
                            <+> quotes (ppr rdr_name) <+> ptext (sLit "is declared")
 
 
+-- | Ad hoc warnings for certain built-in class members supposed to be removed
+-- in GHC 8.*. A better (pragma-based) solution would be preferrable since it
+-- would also be useable in user space, but since time is of the essence this
+-- will have to suffice.
 deprecated_cls_op :: Name    -- ^ Class
                   -> RdrName -- ^ Operation
                   -> Maybe MsgDoc -- ^ Nothing on success, otherwise the warning text
