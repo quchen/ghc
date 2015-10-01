@@ -1,0 +1,8 @@
+
+DeprecatedClassMethodsWarnings.hs:15:5: warning:
+    ‘return’ is deprecated, and will be removed in a future release.
+    Implement pure from Applicative instead.
+
+DeprecatedClassMethodsWarnings.hs:16:5: warning:
+    ‘>>’ is deprecated, and will be removed in a future release.
+    Implement (*>) from Applicative instead.

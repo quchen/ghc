@@ -1,0 +1,1 @@
+test('DeprecatedClassMethodsWarnings', normal, compile, [''])
