@@ -1185,14 +1185,16 @@ data HsSigCtxt
 
 lookupSigOccRn :: HsSigCtxt
                -> Sig RdrName
-               -> Located RdrName -> RnM (Located Name)
+               -> Located RdrName
+               -> RnM (Located Name)
 lookupSigOccRn ctxt sig = lookupSigCtxtOccRn ctxt (hsSigDoc sig)
 
 -- | Lookup a name in relation to the names in a 'HsSigCtxt'
 lookupSigCtxtOccRn :: HsSigCtxt
                    -> SDoc         -- ^ description of thing we're looking up,
                                    -- like "type family"
-                   -> Located RdrName -> RnM (Located Name)
+                   -> Located RdrName
+                   -> RnM (Located Name)
 lookupSigCtxtOccRn ctxt what
   = wrapLocM $ \ rdr_name ->
     do { mb_name <- lookupBindGroupOcc ctxt what rdr_name
@@ -1206,7 +1208,8 @@ lookupSigCtxtOccRn ctxt what
 -- See Note [Looking up signature names]
 lookupBindGroupOcc :: HsSigCtxt
                    -> SDoc
-                   -> RdrName -> RnM (Either MsgDoc Name)
+                   -> RdrName
+                   -> RnM (Either MsgDoc Name)
 lookupBindGroupOcc ctxt what rdr_name
   | Just n <- isExact_maybe rdr_name
   = lookupExactOcc_either n   -- allow for the possibility of missing Exacts;
