@@ -424,37 +424,6 @@ lookupInstDeclBndr cls what rdr
   where
     doc = what <+> ptext (sLit "of class") <+> quotes (ppr cls)
 
--- | Ad hoc warnings for certain built-in class members supposed to be removed
--- in GHC 8.*. A better (pragma-based) solution would be preferable since it
--- would also be useable in user space, but since time is of the essence this
--- will have to suffice.
-checkDeprecatedClassMember :: Name    -- ^ Class
-                           -> RdrName -- ^ Operation
-                           -> RnM ()  -- ^ Warning if deprecated
-checkDeprecatedClassMember cls op =
-    woptM Opt_WarnWarningsDeprecations >>= \case
-        True | Just warn <- lookup (cls, rdrNameOcc op) deprecatedClsOps -> addWarn warn
-        _else -> pure ()
-
-  where
-
-    deprecatedClsOps :: [((Name, OccName), SDoc)]
-    deprecatedClsOps =
-        [ ((monadClassName, nameOccName returnMName), returnWarnMsg)
-        , ((monadClassName, nameOccName thenMName  ), thenWarnMsg)
-        ]
-
-    deprClsOpWarn :: String -> SDoc
-    deprClsOpWarn implementInstead =
-        quotes (ppr op)
-        <+> text "is deprecated, and will be removed in a future release."
-        $$
-        text "Implement" <+> text implementInstead <+> text "instead."
-
-    returnWarnMsg, thenWarnMsg :: SDoc
-    returnWarnMsg = deprClsOpWarn "pure from Applicative"
-    thenWarnMsg = deprClsOpWarn "(*>) from Applicative"
-
 -----------------------------------------------
 lookupFamInstName :: Maybe Name -> Located RdrName -> RnM (Located Name)
 -- Used for TyData and TySynonym family instances only,
@@ -1051,6 +1020,37 @@ lookupImpDeprec iface gre
        FldParent { par_is = p } -> mi_warn_fn iface p
        NoParent                 -> Nothing
        PatternSynonym           -> Nothing
+
+-- | Ad hoc warnings for certain built-in class members supposed to be removed
+-- in GHC 8.*. A better (pragma-based) solution would be preferable since it
+-- would also be useable in user space, but since time is of the essence this
+-- will have to suffice.
+checkDeprecatedClassMember :: Name    -- ^ Class
+                           -> RdrName -- ^ Operation
+                           -> RnM ()  -- ^ Warning if deprecated
+checkDeprecatedClassMember cls op =
+    woptM Opt_WarnWarningsDeprecations >>= \case
+        True | Just warn <- lookup (cls, rdrNameOcc op) deprecatedClsOps -> addWarn warn
+        _else -> pure ()
+
+  where
+
+    deprecatedClsOps :: [((Name, OccName), SDoc)]
+    deprecatedClsOps =
+        [ ((monadClassName, nameOccName returnMName), returnWarnMsg)
+        , ((monadClassName, nameOccName thenMName  ), thenWarnMsg)
+        ]
+
+    deprClsOpWarn :: String -> SDoc
+    deprClsOpWarn implementInstead =
+        quotes (ppr op)
+        <+> text "is deprecated, and will be removed in a future release."
+        $$
+        text "Implement" <+> text implementInstead <+> text "instead."
+
+    returnWarnMsg, thenWarnMsg :: SDoc
+    returnWarnMsg = deprClsOpWarn "pure from Applicative"
+    thenWarnMsg = deprClsOpWarn "(*>) from Applicative"
 
 {-
 Note [Used names with interface not loaded]
