@@ -1,0 +1,1 @@
+test('MissingSemigroupWarnings', normal, compile, [''])

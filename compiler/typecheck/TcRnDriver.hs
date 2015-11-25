@@ -103,6 +103,7 @@ import FastString
 import Maybes
 import Util
 import Bag
+import Inst (tcGetInsts)
 
 import Control.Monad
 
@@ -1153,6 +1154,10 @@ tcTopSrcDecls (HsGroup { hs_tyclds = tycl_decls,
                 -- Generate Applicative/Monad proposal (AMP) warnings
         traceTc "Tc3b" empty ;
 
+                -- Generate Semigroup/Monoid warnings
+        traceTc "Tc3c" empty ;
+        tcSemigroupWarnings ;
+
                 -- Foreign import declarations next.
         traceTc "Tc4" empty ;
         (fi_ids, fi_decls, fi_gres) <- tcForeignImports foreign_decls ;
@@ -1222,6 +1227,171 @@ tcTopSrcDecls (HsGroup { hs_tyclds = tycl_decls,
 
         return (tcg_env', tcl_env)
     }}}}}}
+
+
+tcSemigroupWarnings :: TcM ()
+tcSemigroupWarnings = do
+    traceTc "tcSemigroupWarnings" empty
+    let warnFlag = Opt_WarnMissingSemigroupInstance
+    tcPreludeClashWarn warnFlag sappendName
+    tcMissingParentClassWarn warnFlag monoidClassName semigroupClassName
+
+
+-- | Warn on local definitions of names that would clash with future Prelude
+-- elements.
+--
+--   A name clashes if the following criteria are met:
+--       1. It would is imported (unqualified) from Prelude
+--       2. It is locally defined in the current module
+--       3. It has the same literal name as the reference function
+--       4. It is not identical to the reference function
+tcPreludeClashWarn :: WarningFlag
+                   -> Name
+                   -> TcM ()
+tcPreludeClashWarn warnFlag name = do
+    { warn <- woptM warnFlag
+    ; when warn $ do
+    { traceTc "tcPreludeClashWarn/wouldBeImported" empty
+    -- Is the name imported (unqualified) from Prelude? (Point 4 above)
+    ; rnImports <- fmap (map unLoc . tcg_rn_imports) getGblEnv
+    -- (Note that this automatically handles -XNoImplicitPrelude, as Prelude
+    -- will not appear in rnImports automatically if it is set.)
+
+    -- Continue only the name is imported from Prelude
+    ; when (tcImportedViaPrelude name rnImports) $ do
+      -- Handle 2.-4.
+    { rdrElts <- fmap (concat . occEnvElts . tcg_rdr_env) getGblEnv
+
+    ; let clashes :: GlobalRdrElt -> Bool
+          clashes x = and [ gre_lcl x == True
+                          , nameOccName (gre_name x) == nameOccName name
+                          , gre_name x /= name
+                          ]
+
+          -- List of all offending definitions
+          clashingElts :: [GlobalRdrElt]
+          clashingElts = filter clashes rdrElts
+
+    ; traceTc "tcPreludeClashWarn/prelude_functions"
+                (hang (ppr name) 4 (sep [ppr clashingElts]))
+
+    ; let warn_msg x = addWarnAt (nameSrcSpan $ gre_name x) . hsep $
+              [ ptext (sLit "Local definition of")
+              , quotes . ppr . nameOccName $ gre_name x
+              , ptext (sLit "clashes with a future Prelude name - this will")
+              , ptext (sLit "become an error in a future release.")
+              ]
+    ; mapM_ warn_msg clashingElts
+    }}}
+
+
+-- | Is the given name imported via Prelude?
+--
+--   Possible scenarios:
+--     a) Prelude is imported implicitly, issue warnings.
+--     b) Prelude is imported explicitly, but without mentioning the name in
+--        question. Issue no warnings.
+--     c) Prelude is imported hiding the name in question. Issue no warnings.
+--     d) Qualified import of Prelude, no warnings.
+tcImportedViaPrelude :: Name
+                     -> [ImportDecl Name]
+                     -> Bool
+tcImportedViaPrelude name = any importViaPrelude
+  where
+    isPrelude :: ImportDecl Name -> Bool
+    isPrelude imp = unLoc (ideclName imp) == pRELUDE_NAME
+
+    -- Implicit (Prelude) import?
+    isImplicit :: ImportDecl Name -> Bool
+    isImplicit = ideclImplicit
+
+    -- Unqualified import?
+    isUnqualified :: ImportDecl Name -> Bool
+    isUnqualified = not . ideclQualified
+
+    -- List of explicitly imported (or hidden) Names from a single import.
+    --   Nothing -> No explicit imports
+    --   Just (False, <names>) -> Explicit import list of <names>
+    --   Just (True , <names>) -> Explicit hiding of <names>
+    importList :: ImportDecl Name -> Maybe (Bool, [Name])
+    importList = fmap (\(hidden, loc) -> (hidden, map ieName (map unLoc (unLoc loc)))) . ideclHiding
+
+    -- Check whether the given name would be imported (unqualified) from
+    -- an import declaration.
+    importViaPrelude :: ImportDecl Name -> Bool
+    importViaPrelude x = isPrelude x && isUnqualified x && or [
+        -- Whole Prelude imported -> potential clash
+          isImplicit x
+        -- Explicit import/hiding list, if applicable
+        , case importList x of
+            Just (False, explicit) -> nameOccName name `elem`    map nameOccName explicit
+            Just (True , hidden  ) -> nameOccName name `notElem` map nameOccName hidden
+            Nothing                -> False
+        ]
+
+
+-- Notation: is* is for classes the type is an instance of, should* for those
+--           that it should also be an instance of based on the corresponding
+--           is*.
+tcMissingParentClassWarn :: WarningFlag
+                         -> Name -- ^ Instances of this ...
+                         -> Name -- ^ should also be instances of this
+                         -> TcM ()
+tcMissingParentClassWarn warnFlag isName shouldName
+  = do { warn <- woptM warnFlag
+       ; when warn $ do
+       { isClass'     <- tcLookupClass_maybe isName
+       ; shouldClass' <- tcLookupClass_maybe shouldName
+       ; case (isClass', shouldClass') of
+              (Just isClass, Just shouldClass) -> do
+                  { localInstances <- tcGetInsts
+                  ; let isInstance m = is_cls m == isClass
+                        isInsts = filter isInstance localInstances
+                  ; traceTc "tcMissingParentClassWarn/isInsts" (ppr isInsts)
+                  ; forM_ isInsts $ checkShouldInst isClass shouldClass
+                  }
+              _ -> pure ()
+       }}
+  where
+    -- Check whether the desired superclass exists in a given environment.
+    checkShouldInst :: Class   -- ^ Class of existing instance
+                    -> Class   -- ^ Class there should be an instance of
+                    -> ClsInst -- ^ Existing instance
+                    -> TcM ()
+    checkShouldInst isClass shouldClass isInst
+      = do { instEnv <- tcGetInstEnvs
+           ; let (instanceMatches, shouldInsts, _)
+                    = lookupInstEnv False instEnv shouldClass (is_tys isInst)
+
+           ; traceTc "tcMissingParentClassWarn/checkShouldInst"
+                     (hang (ppr isInst) 4
+                         (sep [ppr instanceMatches, ppr shouldInsts]))
+
+           -- "<location>: Warning: <type> is an instance of <is> but not <should>"
+           -- e.g. "Foo is an instance of Monad but not Applicative"
+           ; let instLoc = srcLocSpan . nameSrcLoc $ getName isInst
+                 warnMsg (Just name:_) =
+                      addWarnAt instLoc . hsep $
+                           [ quotes (ppr $ nameOccName name)
+                           , ptext (sLit "is an instance of")
+                           , ppr . nameOccName $ className isClass
+                           , ptext (sLit "but not")
+                           , ppr . nameOccName $ className shouldClass
+                           , ptext (sLit "- this will become an error in")
+                           , ptext (sLit "a future release.")
+                           ]
+                 warnMsg _ = pure ()
+           ; when (null shouldInsts && null instanceMatches) $
+                  warnMsg (is_tcs isInst)
+           }
+
+    tcLookupClass_maybe :: Name -> TcM (Maybe Class)
+    tcLookupClass_maybe name
+      = do { mb_thing <- tcLookupImported_maybe name
+           ; case mb_thing of
+                Succeeded (ATyCon tc) | Just cls <- tyConClass_maybe tc -> return (Just cls)
+                _ -> return Nothing }
+
 
 ---------------------------
 tcTyClsInstDecls :: [TyClGroup Name]

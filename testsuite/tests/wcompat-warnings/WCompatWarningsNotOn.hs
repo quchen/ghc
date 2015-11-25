@@ -10,3 +10,8 @@ monadFail :: Monad m => m a
 monadFail = do
     Just _ <- undefined
     undefined
+
+data LacksSemigroup
+instance Monoid LacksSemigroup where
+    mempty = undefined
+    mappend = undefined
