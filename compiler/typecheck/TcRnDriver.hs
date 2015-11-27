@@ -7,7 +7,9 @@
 https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/TypeChecker
 -}
 
-{-# LANGUAGE CPP, NondecreasingIndentation #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NondecreasingIndentation #-}
 
 module TcRnDriver (
 #ifdef GHCI
@@ -1258,15 +1260,20 @@ tcPreludeClashWarn warnFlag name = do
     -- will not appear in rnImports automatically if it is set.)
 
     -- Continue only the name is imported from Prelude
-    ; when (tcImportedViaPrelude name rnImports) $ do
+    ; when (importedViaPrelude name rnImports) $ do
       -- Handle 2.-4.
     { rdrElts <- fmap (concat . occEnvElts . tcg_rdr_env) getGblEnv
 
     ; let clashes :: GlobalRdrElt -> Bool
-          clashes x = and [ gre_lcl x == True
-                          , nameOccName (gre_name x) == nameOccName name
-                          , gre_name x /= name
-                          ]
+          clashes x = isLocalDef && nameClashes && isNotInProperModule
+            where
+              isLocalDef = gre_lcl x == True
+              -- Names are identical ...
+              nameClashes = nameOccName (gre_name x) == nameOccName name
+              -- ... but not the actual definitions, because we don't want to
+              -- warn about a bad definition of e.g. <> in Data.Semigroup, which
+              -- is the (only) proper place where this should be defined
+              isNotInProperModule = gre_name x /= name
 
           -- List of all offending definitions
           clashingElts :: [GlobalRdrElt]
@@ -1275,59 +1282,64 @@ tcPreludeClashWarn warnFlag name = do
     ; traceTc "tcPreludeClashWarn/prelude_functions"
                 (hang (ppr name) 4 (sep [ppr clashingElts]))
 
-    ; let warn_msg x = addWarnAt (nameSrcSpan $ gre_name x) . hsep $
-              [ ptext (sLit "Local definition of")
-              , quotes . ppr . nameOccName $ gre_name x
-              , ptext (sLit "clashes with a future Prelude name - this will")
-              , ptext (sLit "become an error in a future release.")
-              ]
+    ; let warn_msg x = addWarnAt (nameSrcSpan (gre_name x)) (hsep
+              [ text "Local definition of"
+              , (quotes . ppr . nameOccName . gre_name) x
+              , text "clashes with a future Prelude name - this will"
+              , text "become an error in a future release."
+              ] )
     ; mapM_ warn_msg clashingElts
     }}}
 
-
--- | Is the given name imported via Prelude?
---
---   Possible scenarios:
---     a) Prelude is imported implicitly, issue warnings.
---     b) Prelude is imported explicitly, but without mentioning the name in
---        question. Issue no warnings.
---     c) Prelude is imported hiding the name in question. Issue no warnings.
---     d) Qualified import of Prelude, no warnings.
-tcImportedViaPrelude :: Name
-                     -> [ImportDecl Name]
-                     -> Bool
-tcImportedViaPrelude name = any importViaPrelude
   where
-    isPrelude :: ImportDecl Name -> Bool
-    isPrelude imp = unLoc (ideclName imp) == pRELUDE_NAME
 
-    -- Implicit (Prelude) import?
-    isImplicit :: ImportDecl Name -> Bool
-    isImplicit = ideclImplicit
+    -- Is the given name imported via Prelude?
+    --
+    -- Possible scenarios:
+    --   a) Prelude is imported implicitly, issue warnings.
+    --   b) Prelude is imported explicitly, but without mentioning the name in
+    --      question. Issue no warnings.
+    --   c) Prelude is imported hiding the name in question. Issue no warnings.
+    --   d) Qualified import of Prelude, no warnings.
+    importedViaPrelude :: Name
+                       -> [ImportDecl Name]
+                       -> Bool
+    importedViaPrelude name = any importViaPrelude
+      where
+        isPrelude :: ImportDecl Name -> Bool
+        isPrelude imp = unLoc (ideclName imp) == pRELUDE_NAME
 
-    -- Unqualified import?
-    isUnqualified :: ImportDecl Name -> Bool
-    isUnqualified = not . ideclQualified
+        -- Implicit (Prelude) import?
+        isImplicit :: ImportDecl Name -> Bool
+        isImplicit = ideclImplicit
 
-    -- List of explicitly imported (or hidden) Names from a single import.
-    --   Nothing -> No explicit imports
-    --   Just (False, <names>) -> Explicit import list of <names>
-    --   Just (True , <names>) -> Explicit hiding of <names>
-    importList :: ImportDecl Name -> Maybe (Bool, [Name])
-    importList = fmap (\(hidden, loc) -> (hidden, map ieName (map unLoc (unLoc loc)))) . ideclHiding
+        -- Unqualified import?
+        isUnqualified :: ImportDecl Name -> Bool
+        isUnqualified = not . ideclQualified
 
-    -- Check whether the given name would be imported (unqualified) from
-    -- an import declaration.
-    importViaPrelude :: ImportDecl Name -> Bool
-    importViaPrelude x = isPrelude x && isUnqualified x && or [
-        -- Whole Prelude imported -> potential clash
-          isImplicit x
-        -- Explicit import/hiding list, if applicable
-        , case importList x of
-            Just (False, explicit) -> nameOccName name `elem`    map nameOccName explicit
-            Just (True , hidden  ) -> nameOccName name `notElem` map nameOccName hidden
-            Nothing                -> False
-        ]
+        -- List of explicitly imported (or hidden) Names from a single import.
+        --   Nothing -> No explicit imports
+        --   Just (False, <names>) -> Explicit import list of <names>
+        --   Just (True , <names>) -> Explicit hiding of <names>
+        importListOf :: ImportDecl Name -> Maybe (Bool, [Name])
+        importListOf = fmap toImportList . ideclHiding
+          where
+            toImportList (h, loc) = (h, map (ieName . unLoc) (unLoc loc))
+
+        isExplicit :: ImportDecl Name -> Bool
+        isExplicit x = case importListOf x of
+            Nothing -> False
+            Just (False, explicit)
+                -> nameOccName name `elem`    map nameOccName explicit
+            Just (True, hidden)
+                -> nameOccName name `notElem` map nameOccName hidden
+
+        -- Check whether the given name would be imported (unqualified) from
+        -- an import declaration.
+        importViaPrelude :: ImportDecl Name -> Bool
+        importViaPrelude x = isPrelude x
+                          && isUnqualified x
+                          && (isImplicit x || isExplicit x)
 
 
 -- Notation: is* is for classes the type is an instance of, should* for those
@@ -1340,7 +1352,8 @@ tcMissingParentClassWarn :: WarningFlag
 tcMissingParentClassWarn warnFlag isName shouldName
   = do { warn <- woptM warnFlag
        ; when warn $ do
-       { isClass'     <- tcLookupClass_maybe isName
+       { traceTc "tcMissingParentClassWarn" empty
+       ; isClass'     <- tcLookupClass_maybe isName
        ; shouldClass' <- tcLookupClass_maybe shouldName
        ; case (isClass', shouldClass') of
               (Just isClass, Just shouldClass) -> do
@@ -1348,9 +1361,18 @@ tcMissingParentClassWarn warnFlag isName shouldName
                   ; let isInstance m = is_cls m == isClass
                         isInsts = filter isInstance localInstances
                   ; traceTc "tcMissingParentClassWarn/isInsts" (ppr isInsts)
-                  ; forM_ isInsts $ checkShouldInst isClass shouldClass
+                  ; forM_ isInsts (checkShouldInst isClass shouldClass)
                   }
-              _ -> pure ()
+              (is',should') ->
+                  traceTc "tcMissingParentClassWarn/notIsShould"
+                          (hang (ppr isName <> text "/" <> ppr shouldName) 2 (
+                            (hsep [ quotes (text "Is"), text "lookup for"
+                                  , ppr isName
+                                  , text "resulted in", ppr is' ])
+                            $$
+                            (hsep [ quotes (text "Should"), text "lookup for"
+                                  , ppr shouldName
+                                  , text "resulted in", ppr should' ])))
        }}
   where
     -- Check whether the desired superclass exists in a given environment.
@@ -1373,12 +1395,12 @@ tcMissingParentClassWarn warnFlag isName shouldName
                  warnMsg (Just name:_) =
                       addWarnAt instLoc . hsep $
                            [ quotes (ppr $ nameOccName name)
-                           , ptext (sLit "is an instance of")
+                           , text "is an instance of"
                            , ppr . nameOccName $ className isClass
-                           , ptext (sLit "but not")
+                           , text "but not"
                            , ppr . nameOccName $ className shouldClass
-                           , ptext (sLit "- this will become an error in")
-                           , ptext (sLit "a future release.")
+                           , text "- this will become an error in"
+                           , text "a future release."
                            ]
                  warnMsg _ = pure ()
            ; when (null shouldInsts && null instanceMatches) $
@@ -1386,11 +1408,9 @@ tcMissingParentClassWarn warnFlag isName shouldName
            }
 
     tcLookupClass_maybe :: Name -> TcM (Maybe Class)
-    tcLookupClass_maybe name
-      = do { mb_thing <- tcLookupImported_maybe name
-           ; case mb_thing of
-                Succeeded (ATyCon tc) | Just cls <- tyConClass_maybe tc -> return (Just cls)
-                _ -> return Nothing }
+    tcLookupClass_maybe name = tcLookupImported_maybe name >>= \case
+        Succeeded (ATyCon tc) | cls@(Just _) <- tyConClass_maybe tc -> pure cls
+        _else -> pure Nothing
 
 
 ---------------------------

@@ -198,7 +198,7 @@ basicKnownKeyNames
         foldableClassName,
         traversableClassName,
         semigroupClassName, sappendName,
-        monoidClassName, memptyName, mappendName,
+        monoidClassName, memptyName, mappendName, mconcatName,
 
         -- The IO type
         -- See Note [TyConRepNames for non-wired-in TyCons]
@@ -946,10 +946,11 @@ traversableClassName  = clsQual  dATA_TRAVERSABLE    (fsLit "Traversable") trave
 semigroupClassName, sappendName :: Name
 semigroupClassName = clsQual dATA_SEMIGROUP (fsLit "Semigroup") semigroupClassKey
 sappendName        = varQual dATA_SEMIGROUP (fsLit "<>")        sappendClassOpKey
-monoidClassName, memptyName, mappendName :: Name
+monoidClassName, memptyName, mappendName, mconcatName :: Name
 monoidClassName    = clsQual dATA_MONOID    (fsLit "Monoid")    monoidClassKey
 memptyName         = varQual dATA_MONOID    (fsLit "mempty")    memptyClassOpKey
 mappendName        = varQual dATA_MONOID    (fsLit "mappend")   mappendClassOpKey
+mconcatName        = varQual dATA_MONOID    (fsLit "mconcat")   mconcatClassOpKey
 
 
 
@@ -2089,10 +2090,13 @@ toDynIdKey            = mkPreludeMiscIdUnique 509
 bitIntegerIdKey :: Unique
 bitIntegerIdKey       = mkPreludeMiscIdUnique 510
 
-sappendClassOpKey, memptyClassOpKey, mappendClassOpKey :: Unique
+sappendClassOpKey :: Unique
 sappendClassOpKey = mkPreludeMiscIdUnique 511
+
+memptyClassOpKey, mappendClassOpKey, mconcatClassOpKey :: Unique
 memptyClassOpKey  = mkPreludeMiscIdUnique 512
 mappendClassOpKey = mkPreludeMiscIdUnique 513
+mconcatClassOpKey = mkPreludeMiscIdUnique 514
 
 
 {-
