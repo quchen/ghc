@@ -947,10 +947,10 @@ semigroupClassName, sappendName :: Name
 semigroupClassName = clsQual dATA_SEMIGROUP (fsLit "Semigroup") semigroupClassKey
 sappendName        = varQual dATA_SEMIGROUP (fsLit "<>")        sappendClassOpKey
 monoidClassName, memptyName, mappendName, mconcatName :: Name
-monoidClassName    = clsQual dATA_MONOID    (fsLit "Monoid")    monoidClassKey
-memptyName         = varQual dATA_MONOID    (fsLit "mempty")    memptyClassOpKey
-mappendName        = varQual dATA_MONOID    (fsLit "mappend")   mappendClassOpKey
-mconcatName        = varQual dATA_MONOID    (fsLit "mconcat")   mconcatClassOpKey
+monoidClassName    = clsQual gHC_BASE       (fsLit "Monoid")    monoidClassKey
+memptyName         = varQual gHC_BASE       (fsLit "mempty")    memptyClassOpKey
+mappendName        = varQual gHC_BASE       (fsLit "mappend")   mappendClassOpKey
+mconcatName        = varQual gHC_BASE       (fsLit "mconcat")   mconcatClassOpKey
 
 
 

@@ -4,7 +4,7 @@
 
 {-# OPTIONS_GHC -fwarn-missing-semigroup-instance #-}
 
-module MissingSemigroupWarnings where
+module SemigroupWarnings where
 
 
 

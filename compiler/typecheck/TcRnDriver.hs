@@ -1285,9 +1285,9 @@ tcPreludeClashWarn warnFlag name = do
     ; let warn_msg x = addWarnAt (nameSrcSpan (gre_name x)) (hsep
               [ text "Local definition of"
               , (quotes . ppr . nameOccName . gre_name) x
-              , text "clashes with a future Prelude name - this will"
-              , text "become an error in a future release."
-              ] )
+              , text "clashes with a future Prelude name." ]
+              $$
+              text "This will become an error in a future release." )
     ; mapM_ warn_msg clashingElts
     }}}
 
@@ -1393,15 +1393,16 @@ tcMissingParentClassWarn warnFlag isName shouldName
            -- e.g. "Foo is an instance of Monad but not Applicative"
            ; let instLoc = srcLocSpan . nameSrcLoc $ getName isInst
                  warnMsg (Just name:_) =
-                      addWarnAt instLoc . hsep $
-                           [ quotes (ppr $ nameOccName name)
-                           , text "is an instance of"
-                           , ppr . nameOccName $ className isClass
-                           , text "but not"
-                           , ppr . nameOccName $ className shouldClass
-                           , text "- this will become an error in"
-                           , text "a future release."
-                           ]
+                      addWarnAt instLoc $
+                           hsep [ (quotes . ppr . nameOccName) name
+                                , text "is an instance of"
+                                , (ppr . nameOccName . className) isClass
+                                , text "but not"
+                                , (ppr . nameOccName . className) shouldClass ]
+                                <> text "."
+                           $$
+                           hsep [ text "This will become an error in"
+                                , text "a future release." ]
                  warnMsg _ = pure ()
            ; when (null shouldInsts && null instanceMatches) $
                   warnMsg (is_tcs isInst)

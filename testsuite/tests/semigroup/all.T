@@ -1,1 +1,1 @@
-test('MissingSemigroupWarnings', normal, compile, [''])
+test('SemigroupWarnings', normal, compile, [''])
