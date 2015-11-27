@@ -79,6 +79,10 @@ import Data.Set (Set)
 #if __GLASGOW_HASKELL__ < 709
 import Data.Monoid hiding ((<>))
 #endif
+#if __GLASGOW_HASKELL__ > 710
+import Data.Semigroup   ( Semigroup )
+import qualified Data.Semigroup as Semigroup
+#endif
 import qualified Data.Map as Map
 import qualified FiniteMap as Map
 import qualified Data.Set as Set
@@ -190,6 +194,11 @@ fromReexportedModules False pkg = ModOrigin Nothing [] [pkg] False
 -- | Smart constructor for a module which was bound by a package flag.
 fromFlag :: ModuleOrigin
 fromFlag = ModOrigin Nothing [] [] True
+
+#if __GLASGOW_HASKELL__ > 710
+instance Semigroup ModuleOrigin where
+  (<>) = mappend
+#endif
 
 instance Monoid ModuleOrigin where
     mempty = ModOrigin Nothing [] [] False
