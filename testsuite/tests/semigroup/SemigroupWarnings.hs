@@ -2,7 +2,7 @@
 -- Ensure that missing semigroup warnings are issued
 -- correctly if the warning flag is enabled
 
-{-# OPTIONS_GHC -fwarn-missing-semigroup-instance #-}
+{-# OPTIONS_GHC -fwarn-semigroup #-}
 
 module SemigroupWarnings where
 

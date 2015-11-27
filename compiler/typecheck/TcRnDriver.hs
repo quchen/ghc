@@ -1234,7 +1234,7 @@ tcTopSrcDecls (HsGroup { hs_tyclds = tycl_decls,
 tcSemigroupWarnings :: TcM ()
 tcSemigroupWarnings = do
     traceTc "tcSemigroupWarnings" empty
-    let warnFlag = Opt_WarnMissingSemigroupInstance
+    let warnFlag = Opt_WarnSemigroup
     tcPreludeClashWarn warnFlag sappendName
     tcMissingParentClassWarn warnFlag monoidClassName semigroupClassName
 
@@ -1389,8 +1389,8 @@ tcMissingParentClassWarn warnFlag isName shouldName
                      (hang (ppr isInst) 4
                          (sep [ppr instanceMatches, ppr shouldInsts]))
 
-           -- "<location>: Warning: <type> is an instance of <is> but not <should>"
-           -- e.g. "Foo is an instance of Monad but not Applicative"
+           -- "<location>: Warning: <type> is an instance of <is> but not
+           -- <should>" e.g. "Foo is an instance of Monad but not Applicative"
            ; let instLoc = srcLocSpan . nameSrcLoc $ getName isInst
                  warnMsg (Just name:_) =
                       addWarnAt instLoc $
