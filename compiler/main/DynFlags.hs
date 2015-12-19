@@ -480,7 +480,7 @@ data GeneralFlag
 
    deriving (Eq, Show, Enum)
 
-data WarningFlag =
+data WarningFlagPrimitive =
 -- See Note [Updating flag description in the User's Guide]
      Opt_WarnDuplicateExports
    | Opt_WarnDuplicateConstraints
@@ -718,7 +718,7 @@ data DynFlags = DynFlags {
   -- hsc dynamic flags
   dumpFlags             :: IntSet,
   generalFlags          :: IntSet,
-  warningFlags          :: IntSet,
+  warningFlags          :: IntMap WarningMeta,
   -- Don't change this without updating extensionFlags:
   language              :: Maybe Language,
   -- | Safe Haskell mode
@@ -3361,84 +3361,104 @@ optLevelFlags -- see Note [Documenting optimisation flags]
 --  * utils/mkUserGuidePart/
 --  * docs/users_guide/using.rst
 
+data WarningSeverity = WarnIsWarn | WarnIsError
+
+data WarningMeta = WarningMeta
+    WarningSeverity
+    [WarningGroup] -- ^ Groups that transitively enabled a warning
+
+newtype WarningGroup = WarningGroup
+    String -- ^ Enabling flag trunk, e.g. "all" for -Wall
+    [WarningFlag] -- ^ Flags contained
+
+instance Monoid WarningGroup where
+    mempty = WarningGroup [] []
+    WarningGroup name flags `mappend` WarningGroup _name' flags'
+        = WarningGroup name (flags `mappend` flags')
+
 -- | Warnings enabled unless specified otherwise
-standardWarnings :: [WarningFlag]
-standardWarnings -- see Note [Documenting warning flags]
-    = [ Opt_WarnOverlappingPatterns,
-        Opt_WarnWarningsDeprecations,
-        Opt_WarnDeprecatedFlags,
-        Opt_WarnDeferredTypeErrors,
-        Opt_WarnTypedHoles,
-        Opt_WarnPartialTypeSignatures,
-        Opt_WarnUnrecognisedPragmas,
-        Opt_WarnRedundantConstraints,
-        Opt_WarnDuplicateExports,
-        Opt_WarnOverflowedLiterals,
-        Opt_WarnEmptyEnumerations,
-        Opt_WarnMissingFields,
-        Opt_WarnMissingMethods,
-        Opt_WarnWrongDoBind,
-        Opt_WarnUnsupportedCallingConventions,
-        Opt_WarnDodgyForeignImports,
-        Opt_WarnInlineRuleShadowing,
-        Opt_WarnAlternativeLayoutRuleTransitional,
-        Opt_WarnUnsupportedLlvmVersion,
-        Opt_WarnTabs
-      ]
+standardWarnings :: WarningGroup
+-- see Note [Documenting warning flags]
+standardWarnings = WFlagGroup "default" flags
+  where
+    flags =
+        [ Opt_WarnOverlappingPatterns
+        , Opt_WarnWarningsDeprecations
+        , Opt_WarnDeprecatedFlags
+        , Opt_WarnDeferredTypeErrors
+        , Opt_WarnTypedHoles
+        , Opt_WarnPartialTypeSignatures
+        , Opt_WarnUnrecognisedPragmas
+        , Opt_WarnRedundantConstraints
+        , Opt_WarnDuplicateExports
+        , Opt_WarnOverflowedLiterals
+        , Opt_WarnEmptyEnumerations
+        , Opt_WarnMissingFields
+        , Opt_WarnMissingMethods
+        , Opt_WarnWrongDoBind
+        , Opt_WarnUnsupportedCallingConventions
+        , Opt_WarnDodgyForeignImports
+        , Opt_WarnInlineRuleShadowing
+        , Opt_WarnAlternativeLayoutRuleTransitional
+        , Opt_WarnUnsupportedLlvmVersion
+        , Opt_WarnTabs ]
 
 -- | Things you get with -W
-minusWOpts :: [WarningFlag]
-minusWOpts
-    = standardWarnings ++
-      [ Opt_WarnUnusedTopBinds,
-        Opt_WarnUnusedLocalBinds,
-        Opt_WarnUnusedPatternBinds,
-        Opt_WarnUnusedMatches,
-        Opt_WarnUnusedImports,
-        Opt_WarnIncompletePatterns,
-        Opt_WarnDodgyExports,
-        Opt_WarnDodgyImports
-      ]
+minusWOpts :: WarningGroup
+minusWOpts = WFlagGroup "" flags `mappend` standardWarnings
+  where
+    flags =
+        [ Opt_WarnUnusedTopBinds
+        , Opt_WarnUnusedLocalBinds
+        , Opt_WarnUnusedPatternBinds
+        , Opt_WarnUnusedMatches
+        , Opt_WarnUnusedImports
+        , Opt_WarnIncompletePatterns
+        , Opt_WarnDodgyExports
+        , Opt_WarnDodgyImports ]
 
 -- | Things you get with -Wall
-minusWallOpts :: [WarningFlag]
-minusWallOpts
-    = minusWOpts ++
-      [ Opt_WarnTypeDefaults,
-        Opt_WarnNameShadowing,
-        Opt_WarnMissingSigs,
-        Opt_WarnHiShadows,
-        Opt_WarnOrphans,
-        Opt_WarnUnusedDoBind,
-        Opt_WarnTrustworthySafe,
-        Opt_WarnUntickedPromotedConstructors,
-        Opt_WarnMissingPatSynSigs
-      ]
+minusWallOpts :: WarningGroup
+minusWallOpts = WFlagGroup "all" flags `mappend` minusWOpts
+  where
+    flags =
+        [ Opt_WarnTypeDefaults
+        , Opt_WarnNameShadowing
+        , Opt_WarnMissingSigs
+        , Opt_WarnHiShadows
+        , Opt_WarnOrphans
+        , Opt_WarnUnusedDoBind
+        , Opt_WarnTrustworthySafe
+        , Opt_WarnUntickedPromotedConstructors
+        , Opt_WarnMissingPatSynSigs ]
 
 -- | Things you get with -Wcompat.
 --
 -- This is intended to group together warnings that will be enabled by default
 -- at some point in the future, so that library authors eager to make their
 -- code future compatible to fix issues before they even generate warnings.
-minusWcompatOpts :: [WarningFlag]
-minusWcompatOpts
-    = [ Opt_WarnMissingMonadFailInstance
-      , Opt_WarnSemigroup
-      , Opt_WarnNonCanonicalMonoidInstances
-      ]
+minusWcompatOpts :: WarningGroup
+minusWcompatOpts = WFlagGroup "compat" flags
+  where
+    flags =
+        [ Opt_WarnMissingMonadFailInstance
+        , Opt_WarnSemigroup
+        , Opt_WarnNonCanonicalMonoidInstances ]
+
+-- Things you get with -Wunused-binds
+unusedBindsFlags :: WarningGroup
+unusedBindsFlags = WFlagGroup "unused-binds" flags
+  where
+    flags =
+        [ Opt_WarnUnusedTopBinds
+        , Opt_WarnUnusedLocalBinds
+        , Opt_WarnUnusedPatternBinds ]
 
 enableUnusedBinds :: DynP ()
 enableUnusedBinds = mapM_ setWarningFlag unusedBindsFlags
 
 disableUnusedBinds :: DynP ()
 disableUnusedBinds = mapM_ unSetWarningFlag unusedBindsFlags
-
--- Things you get with -Wunused-binds
-unusedBindsFlags :: [WarningFlag]
-unusedBindsFlags = [ Opt_WarnUnusedTopBinds
-                   , Opt_WarnUnusedLocalBinds
-                   , Opt_WarnUnusedPatternBinds
-                   ]
 
 enableGlasgowExts :: DynP ()
 enableGlasgowExts = do setGeneralFlag Opt_PrintExplicitForalls
