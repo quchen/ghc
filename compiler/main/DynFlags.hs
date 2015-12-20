@@ -1684,15 +1684,16 @@ gopt_unset dfs f = dfs{ generalFlags = IntSet.delete (fromEnum f) (generalFlags 
 
 -- | Test whether a 'WarningFlag' is set
 wopt :: WarningFlag -> DynFlags -> Bool
-wopt f dflags  = fromEnum f `IntSet.member` warningFlags dflags
+wopt f dflags  = fromEnum f `IntMap.member` warningFlags dflags
 
 -- | Set a 'WarningFlag'
-wopt_set :: DynFlags -> WarningFlag -> DynFlags
-wopt_set dfs f = dfs{ warningFlags = IntSet.insert (fromEnum f) (warningFlags dfs) }
+wopt_set :: DynFlags -> WarningFlag -> WarningMeta -> DynFlags
+wopt_set dfs flag meta =
+    dfs { warningFlags = IntMap.insert (fromEnum f) meta (warningFlags dfs) }
 
 -- | Unset a 'WarningFlag'
 wopt_unset :: DynFlags -> WarningFlag -> DynFlags
-wopt_unset dfs f = dfs{ warningFlags = IntSet.delete (fromEnum f) (warningFlags dfs) }
+wopt_unset dfs f = dfs{ warningFlags = IntMap.delete (fromEnum f) (warningFlags dfs) }
 
 -- | Test whether a 'LangExt.Extension' is set
 xopt :: LangExt.Extension -> DynFlags -> Bool
@@ -2483,12 +2484,12 @@ dynamic_flags = [
   , defGhcFlag "mavx512pf"    (noArg (\d -> d{ avx512pf = True }))
 
      ------ Warning opts -------------------------------------------------
-  , defFlag "W"       (NoArg (mapM_ setWarningFlag minusWOpts))
-  , defFlag "Werror"  (NoArg (setGeneralFlag           Opt_WarnIsError))
-  , defFlag "Wwarn"   (NoArg (unSetGeneralFlag         Opt_WarnIsError))
-  , defFlag "Wcompat" (NoArg (mapM_ setWarningFlag minusWcompatOpts))
-  , defFlag "Wno-compat" (NoArg (mapM_ unSetWarningFlag minusWcompatOpts))
-  , defFlag "Wall"    (NoArg (mapM_ setWarningFlag minusWallOpts))
+  , defFlag "W"       (NoArg (setWarningGroup minusWOpts))
+  , defFlag "Werror"  (NoArg (setGeneralFlag   Opt_WarnIsError))
+  , defFlag "Wwarn"   (NoArg (unSetGeneralFlag Opt_WarnIsError))
+  , defFlag "Wcompat" (NoArg (setWarningGroup minusWcompatOpts))
+  , defFlag "Wno-compat" (NoArg (unSetWarningGroup minusWcompatOpts))
+  , defFlag "Wall"    (NoArg (setWarningGroup minusWallOpts))
   , defFlag "Wnot"    (NoArg (do upd (\dfs -> dfs {warningFlags = IntSet.empty})
                                  deprecate "Use -w instead"))
   , defFlag "w"       (NoArg (upd (\dfs -> dfs {warningFlags = IntSet.empty})))
@@ -3364,8 +3365,19 @@ optLevelFlags -- see Note [Documenting optimisation flags]
 data WarningSeverity = WarnIsWarn | WarnIsError
 
 data WarningMeta = WarningMeta
-    WarningSeverity
+    (Maybe WarningSeverity) -- ^ Override for -Wwarn/-Werror
     [WarningGroup] -- ^ Groups that transitively enabled a warning
+
+noWarningMeta :: WarningMeta
+noWarningMeta = WarningMeta Nothing []
+
+instance Monoid WarningMeta where
+    mempty = WarningMeta Nothing []
+    mappend (WarningMeta s1 g1) (WarningMeta s2 g2) = WarningMeta s3 g3
+      where
+        s3 = getLast (Last s1 <> Last s2)
+        g3 = g1 <> g2
+
 
 newtype WarningGroup = WarningGroup
     String -- ^ Enabling flag trunk, e.g. "all" for -Wall
@@ -3379,7 +3391,7 @@ instance Monoid WarningGroup where
 -- | Warnings enabled unless specified otherwise
 standardWarnings :: WarningGroup
 -- see Note [Documenting warning flags]
-standardWarnings = WFlagGroup "default" flags
+standardWarnings = WarningGroup "default" flags
   where
     flags =
         [ Opt_WarnOverlappingPatterns
@@ -3405,7 +3417,7 @@ standardWarnings = WFlagGroup "default" flags
 
 -- | Things you get with -W
 minusWOpts :: WarningGroup
-minusWOpts = WFlagGroup "" flags `mappend` standardWarnings
+minusWOpts = WarningGroup "" flags `mappend` standardWarnings
   where
     flags =
         [ Opt_WarnUnusedTopBinds
@@ -3419,7 +3431,7 @@ minusWOpts = WFlagGroup "" flags `mappend` standardWarnings
 
 -- | Things you get with -Wall
 minusWallOpts :: WarningGroup
-minusWallOpts = WFlagGroup "all" flags `mappend` minusWOpts
+minusWallOpts = WarningGroup "all" flags `mappend` minusWOpts
   where
     flags =
         [ Opt_WarnTypeDefaults
@@ -3438,7 +3450,7 @@ minusWallOpts = WFlagGroup "all" flags `mappend` minusWOpts
 -- at some point in the future, so that library authors eager to make their
 -- code future compatible to fix issues before they even generate warnings.
 minusWcompatOpts :: WarningGroup
-minusWcompatOpts = WFlagGroup "compat" flags
+minusWcompatOpts = WarningGroup "compat" flags
   where
     flags =
         [ Opt_WarnMissingMonadFailInstance
@@ -3447,7 +3459,7 @@ minusWcompatOpts = WFlagGroup "compat" flags
 
 -- Things you get with -Wunused-binds
 unusedBindsFlags :: WarningGroup
-unusedBindsFlags = WFlagGroup "unused-binds" flags
+unusedBindsFlags = WarningGroup "unused-binds" flags
   where
     flags =
         [ Opt_WarnUnusedTopBinds
@@ -3664,9 +3676,16 @@ unSetGeneralFlag' f dflags = foldr ($) (gopt_unset dflags f) deps
    --     imply further flags.
 
 --------------------------
-setWarningFlag, unSetWarningFlag :: WarningFlag -> DynP ()
-setWarningFlag   f = upd (\dfs -> wopt_set dfs f)
-unSetWarningFlag f = upd (\dfs -> wopt_unset dfs f)
+setWarningFlag :: WarningFlag -> WarningMeta -> DynP ()
+setWarningFlag flag meta = upd (\dfs -> wopt_set dfs flag meta)
+
+unSetWarningFlag :: WarningFlag -> DynP ()
+unSetWarningFlag flag meta = upd (\dfs -> wopt_unset dfs flag)
+
+setWarningGroup :: WarningGroup -> DynP ()
+setWarningGroup (WarningGroup _name flags) =
+    for_ flags (do
+
 
 --------------------------
 setExtensionFlag, unSetExtensionFlag :: LangExt.Extension -> DynP ()
